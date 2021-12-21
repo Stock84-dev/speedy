@@ -3,6 +3,7 @@
 extern crate test;
 
 use std::io::Write;
+use std::io::Read;
 use std::borrow::Cow;
 use test::{Bencher, black_box};
 use speedy::{Context, Readable, Reader, Writable, Endianness};
@@ -65,7 +66,7 @@ fn read_speedy_megabyte_buffer_cow_owned( b: &mut Bencher ) {
 
     buffer = black_box( buffer );
     b.iter( || {
-        let deserialized: Cow< [u8] > = Readable::read_from_buffer_copying_data_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+        let deserialized: Cow< [u8] > = Readable::read_from_buffer_owned_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
         deserialized
     })
 }
@@ -94,7 +95,7 @@ fn read_speedy_megabyte_buffer_vec_non_primitive( b: &mut Bencher ) {
 
     buffer = black_box( buffer );
     b.iter( || {
-        let deserialized: Vec< Byte > = Readable::read_from_buffer_copying_data_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+        let deserialized: Vec< Byte > = Readable::read_from_buffer_owned_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
         deserialized
     })
 }
@@ -127,10 +128,53 @@ fn read_speedy_many_small_structs( b: &mut Bencher ) {
 
     buffer = black_box( buffer );
     b.iter( || {
-        let deserialized: Vec< Dummy > = Readable::read_from_buffer_copying_data_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+        let deserialized: Vec< Dummy > = Readable::read_from_buffer_owned_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
         deserialized
     })
 }
+#[bench]
+fn read_many_small_structs_file( b: &mut Bencher ) {
+    let mut buffer: Vec< Dummy > = Vec::new();
+    let mut file = std::fs::File::open("/home/stock/cache/rsi/run.seek_f32").unwrap();
+    let mut buffer = vec![0u8; 1024 * 1024 * std::mem::size_of::<Dummy>()];
+    let now = std::time::Instant::now();
+    file.read_exact(&mut buffer).unwrap();
+    println!("{} us", now.elapsed().as_micros());
+    let mut file2 = std::fs::File::create("/home/stock/data/speedy").unwrap();
+    let slice: &[Dummy] = unsafe {std::slice::from_raw_parts(buffer.as_ptr() as * const _, buffer.len() / std::mem::size_of::<Dummy>())};
+    Writable::write_to_stream_with_ctx(slice, Endianness::NATIVE, file2).unwrap();
+}
+
+//#[bench]
+//fn read_speedy_many_small_structs_file_unbuffered( b: &mut Bencher ) {
+//    let file = std::fs::File::open("/home/stock/cache/rsi/run.seek_f32").unwrap();
+//    let now = std::time::Instant::now();
+//        let deserialized: Vec< Dummy > = Readable::read_from_stream_unbuffered_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+//    println!("{} us", now.elapsed.as_micros());
+//}
+//
+//#[bench]
+//fn read_speedy_many_small_structs_file_buffered( b: &mut Bencher ) {
+//    let mut buffer: Vec< Dummy > = Vec::new();
+//    let file = std::fs::File::open("/home/stock/cache/rsi/run.seek_f32").unwrap();
+//    let dummy = Dummy {
+//        a: 1,
+//        b: 2,
+//        c: 3,
+//        d: 4,
+//        e: 5.0,
+//        f: 6.0,
+//        g: true
+//    };
+//    buffer.resize( 1024 * 1024, dummy );
+//    let mut buffer = buffer.write_to_vec_with_ctx( Endianness::NATIVE ).unwrap();
+//
+//    buffer = black_box( buffer );
+//    b.iter( || {
+//        let deserialized: Vec< Dummy > = Readable::read_from_stream_buffered_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+//        deserialized
+//    })
+//}
 
 #[bench]
 fn write_speedy_many_small_structs( b: &mut Bencher ) {
@@ -181,7 +225,7 @@ fn read_varint_random( b: &mut Bencher ) {
 
     buffer = black_box( buffer );
     b.iter( || {
-        let deserialized: Vec< VarInt64 > = Readable::read_from_buffer_copying_data_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+        let deserialized: Vec< VarInt64 > = Readable::read_from_buffer_owned_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
         deserialized
     })
 }
@@ -196,7 +240,7 @@ fn read_varint_always_one_byte( b: &mut Bencher ) {
 
     buffer = black_box( buffer );
     b.iter( || {
-        let deserialized: Vec< VarInt64 > = Readable::read_from_buffer_copying_data_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+        let deserialized: Vec< VarInt64 > = Readable::read_from_buffer_owned_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
         deserialized
     })
 }
@@ -211,7 +255,7 @@ fn read_varint_always_eight_bytes( b: &mut Bencher ) {
 
     buffer = black_box( buffer );
     b.iter( || {
-        let deserialized: Vec< VarInt64 > = Readable::read_from_buffer_copying_data_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
+        let deserialized: Vec< VarInt64 > = Readable::read_from_buffer_owned_with_ctx( Endianness::NATIVE, &buffer ).unwrap();
         deserialized
     })
 }

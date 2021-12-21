@@ -66,7 +66,7 @@ fn possibly_uses_generic_ty( generic_types: &[&syn::Ident], ty: &syn::Type ) -> 
     match ty {
         syn::Type::Path( syn::TypePath { qself: None, path: syn::Path { leading_colon: None, segments } } ) => {
             segments.iter().any( |segment| {
-                if generic_types.iter().any( |&ident| *ident == segment.ident ) {
+                if generic_types.iter().any( |&ident| ident == &segments[ 0 ].ident ) {
                     return true;
                 }
 
@@ -132,7 +132,6 @@ fn test_possibly_uses_generic_ty() {
     assert_test!( false, ! );
     assert_test!( false, [u8; 2] );
     assert_test!( true, T );
-    assert_test!( true, Dummy::T );
     assert_test!( true, Cow<'a, BTreeMap<T, u8>> );
     assert_test!( true, Cow<'a, BTreeMap<u8, T>> );
     assert_test!( true, Cow<'a, [T]> );
@@ -142,84 +141,6 @@ fn test_possibly_uses_generic_ty() {
     assert_test!( true, *const T );
     assert_test!( true, [T; 2] );
     assert_test!( true, Vec<T> );
-}
-
-fn is_guaranteed_non_recursive( ty: &syn::Type ) -> bool {
-    match ty {
-        syn::Type::Path( syn::TypePath { qself: None, path: syn::Path { leading_colon: None, segments } } ) => {
-            if segments.len() != 1 {
-                return false;
-            }
-
-            let segment = &segments[ 0 ];
-            let ident = segment.ident.to_string();
-            match ident.as_str() {
-                "String" | "Vec" | "BTreeSet" | "BTreeMap" | "HashSet" | "HashMap" |
-                "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "usize" | "isize" |
-                "str" => {},
-                _ => return false
-            }
-
-            match segment.arguments {
-                syn::PathArguments::None => true,
-                syn::PathArguments::AngleBracketed( syn::AngleBracketedGenericArguments { ref args, .. } ) => {
-                    args.iter().all( |arg| {
-                            match arg {
-                                syn::GenericArgument::Lifetime( .. ) => true,
-                                syn::GenericArgument::Type( inner_ty ) => is_guaranteed_non_recursive( inner_ty ),
-                                // TODO: How to handle these?
-                                syn::GenericArgument::Binding( .. ) => false,
-                                syn::GenericArgument::Constraint( .. ) => false,
-                                syn::GenericArgument::Const( .. ) => false
-                            }
-                        })
-                },
-                _ => false
-            }
-        },
-        syn::Type::Slice( syn::TypeSlice { elem, .. } ) => is_guaranteed_non_recursive( &elem ),
-        syn::Type::Tuple( syn::TypeTuple { elems, .. } ) => elems.iter().all( |elem| is_guaranteed_non_recursive( elem ) ),
-        syn::Type::Reference( syn::TypeReference { elem, .. } ) => is_guaranteed_non_recursive( &elem ),
-        syn::Type::Paren( syn::TypeParen { elem, .. } ) => is_guaranteed_non_recursive( &elem ),
-        syn::Type::Ptr( syn::TypePtr { elem, .. } ) => is_guaranteed_non_recursive( &elem ),
-        syn::Type::Group( syn::TypeGroup { elem, .. } ) => is_guaranteed_non_recursive( &elem ),
-        syn::Type::Array( syn::TypeArray { elem, len, .. } ) => {
-            if !is_guaranteed_non_recursive( &elem ) {
-                return false;
-            }
-
-            // This is probably too conservative.
-            match len {
-                syn::Expr::Lit( .. ) => true,
-                _ => false
-            }
-        },
-        syn::Type::Never( .. ) => true,
-        _ => false
-    }
-}
-
-#[test]
-fn test_is_guaranteed_non_recursive() {
-    macro_rules! assert_test {
-        ($result:expr, $($token:tt)+) => {
-            assert_eq!(
-                is_guaranteed_non_recursive( &syn::parse2( quote! { $($token)+ } ).unwrap() ),
-                $result
-            );
-        }
-    }
-
-    assert_test!( true, String );
-    assert_test!( true, u8 );
-    assert_test!( true, () );
-    assert_test!( true, *const u8 );
-    assert_test!( true, [u8; 2] );
-    assert_test!( true, (u8, u16) );
-    assert_test!( true, ! );
-    assert_test!( true, Vec< u8 > );
-    assert_test!( false, T );
-    assert_test!( false, Vec< T > );
 }
 
 fn common_tokens( ast: &syn::DeriveInput, types: &[syn::Type], trait_variant: Trait ) -> (TokenStream, TokenStream, TokenStream) {
@@ -444,20 +365,6 @@ struct EnumAttributes {
     peek_tag: bool
 }
 
-fn is_transparent( attrs: &[syn::Attribute] ) -> bool {
-    let mut result = false;
-    for raw_attr in attrs {
-        let path = raw_attr.path.clone().into_token_stream().to_string();
-        if path != "repr" {
-            continue;
-        }
-
-        result = raw_attr.tokens.clone().into_token_stream().to_string() == "(transparent)";
-    }
-
-    result
-}
-
 fn parse_attributes< T >( attrs: &[syn::Attribute] ) -> Result< Vec< T >, syn::Error > where T: syn::parse::Parse {
     struct RawAttributes< T >( syn::punctuated::Punctuated< T, Token![,] > );
 
@@ -578,10 +485,6 @@ impl< 'a > Struct< 'a > {
 
         Ok( structure )
     }
-
-    fn is_guaranteed_non_recursive( &self ) -> bool {
-        self.fields.iter().all( |field| field.is_guaranteed_non_recursive() )
-    }
 }
 
 struct Field< 'a > {
@@ -632,10 +535,6 @@ impl< 'a > Field< 'a > {
             | Ty::CowStr( .. ) => vec![],
             | Ty::Ty( _ ) => vec![ self.raw_ty.clone() ]
         }
-    }
-
-    fn is_guaranteed_non_recursive( &self ) -> bool {
-        is_guaranteed_non_recursive( &self.raw_ty )
     }
 }
 
@@ -1630,15 +1529,10 @@ fn min< I >( values: I ) -> TokenStream where I: IntoIterator< Item = TokenStrea
 fn impl_readable( input: syn::DeriveInput ) -> Result< TokenStream, syn::Error > {
     let name = &input.ident;
     let mut types = Vec::new();
-    let mut inner_field = None;
-
     let (reader_body, minimum_bytes_needed_body) = match &input.data {
         syn::Data::Struct( syn::DataStruct { ref fields, .. } ) => {
             let attrs = parse_attributes::< StructAttribute >( &input.attrs )?;
             let structure = Struct::new( fields, attrs )?;
-            if fields.len() == 1 && is_transparent( &input.attrs ) {
-                inner_field = Some( structure.fields[0].raw_ty.clone() );
-            }
             let (body, initializer, minimum_bytes) = readable_body( &mut types, &structure );
             let reader_body = quote! {
                 #body
@@ -1663,9 +1557,7 @@ fn impl_readable( input: syn::DeriveInput ) -> Result< TokenStream, syn::Error >
                 });
 
                 if variant.structure.kind != StructKind::Unit {
-                    if variant.structure.is_guaranteed_non_recursive() {
-                        variant_minimum_sizes.push( minimum_bytes );
-                    }
+                    variant_minimum_sizes.push( minimum_bytes );
                 }
             }
 
@@ -1718,37 +1610,6 @@ fn impl_readable( input: syn::DeriveInput ) -> Result< TokenStream, syn::Error >
     };
 
     let (impl_params, ty_params, where_clause) = common_tokens( &input, &types, Trait::Readable );
-    let impl_primitive = if let Some( field_ty ) = inner_field {
-        quote! {
-            #[inline(always)]
-            fn speedy_is_primitive() -> bool {
-                <#field_ty as speedy::Readable< 'a_, C_ >>::speedy_is_primitive()
-            }
-
-            #[inline(always)]
-            unsafe fn speedy_slice_as_bytes_mut( slice: &mut [Self] ) -> &mut [u8] {
-                let slice = std::slice::from_raw_parts_mut( slice.as_mut_ptr() as *mut #field_ty, slice.len() );
-                <#field_ty as speedy::Readable< 'a_, C_ >>::speedy_slice_as_bytes_mut( slice )
-            }
-
-            #[inline]
-            unsafe fn speedy_slice_from_bytes( slice: &[u8] ) -> &[Self] {
-                let slice = <#field_ty as speedy::Readable< 'a_, C_ >>::speedy_slice_from_bytes( slice );
-                std::slice::from_raw_parts( slice.as_ptr() as *const Self, slice.len() )
-            }
-
-            #[inline(always)]
-            fn speedy_convert_slice_endianness( endianness: speedy::Endianness, slice: &mut [Self] ) {
-                unsafe {
-                    let slice = std::slice::from_raw_parts_mut( slice.as_mut_ptr() as *mut #field_ty, slice.len() );
-                    <#field_ty as speedy::Readable< 'a_, C_ >>::speedy_convert_slice_endianness( endianness, slice )
-                }
-            }
-        }
-    } else {
-        quote! {}
-    };
-
     let output = quote! {
         impl< 'a_, #impl_params C_: speedy::Context > speedy::Readable< 'a_, C_ > for #name #ty_params #where_clause {
             #[inline]
@@ -1760,8 +1621,6 @@ fn impl_readable( input: syn::DeriveInput ) -> Result< TokenStream, syn::Error >
             fn minimum_bytes_needed() -> usize {
                 #minimum_bytes_needed_body
             }
-
-            #impl_primitive
         }
     };
 
@@ -1769,7 +1628,7 @@ fn impl_readable( input: syn::DeriveInput ) -> Result< TokenStream, syn::Error >
 }
 
 fn assign_to_variables< 'a >( fields: impl IntoIterator< Item = &'a Field< 'a > > ) -> TokenStream {
-    let fields: Vec< _ > = fields.into_iter().filter(|field| !field.skip).map( |field| {
+    let fields: Vec< _ > = fields.into_iter().map( |field| {
         let var_name = field.var_name();
         let name = field.name();
 

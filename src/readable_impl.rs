@@ -455,13 +455,6 @@ macro_rules! repeat {
     (6, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr] };
     (7, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr] };
     (8, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (9, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (10, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (11, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (12, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (13, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (14, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
-    (15, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
     (16, $expr:expr) => { [$expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr, $expr] };
 }
 
@@ -490,57 +483,4 @@ impl_for_array!( 5 );
 impl_for_array!( 6 );
 impl_for_array!( 7 );
 impl_for_array!( 8 );
-impl_for_array!( 9 );
-impl_for_array!( 10 );
-impl_for_array!( 11 );
-impl_for_array!( 12 );
-impl_for_array!( 13 );
-impl_for_array!( 14 );
-impl_for_array!( 15 );
 impl_for_array!( 16 );
-
-impl< 'a, C, T > Readable< 'a, C > for Box< T >
-    where C: Context,
-          T: Readable< 'a, C >
-{
-    #[inline]
-    fn read_from< R >( reader: &mut R ) -> Result< Self, C::Error > where R: Reader< 'a, C > {
-        Ok( Box::new( T::read_from( reader )? ) )
-    }
-
-    #[inline]
-    fn minimum_bytes_needed() -> usize {
-        T::minimum_bytes_needed()
-    }
-}
-
-impl< 'a, C, T > Readable< 'a, C > for Box< [T] >
-    where C: Context,
-          T: Readable< 'a, C >
-{
-    #[inline]
-    fn read_from< R >( reader: &mut R ) -> Result< Self, C::Error > where R: Reader< 'a, C > {
-        let data = Vec::< T >::read_from( reader )?;
-        Ok( data.into() )
-    }
-
-    #[inline]
-    fn minimum_bytes_needed() -> usize {
-        Vec::< T >::minimum_bytes_needed()
-    }
-}
-
-impl< 'a, C > Readable< 'a, C > for Box< str >
-    where C: Context
-{
-    #[inline]
-    fn read_from< R >( reader: &mut R ) -> Result< Self, C::Error > where R: Reader< 'a, C > {
-        let data = String::read_from( reader )?;
-        Ok( data.into() )
-    }
-
-    #[inline]
-    fn minimum_bytes_needed() -> usize {
-        <String as Readable< 'a, C >>::minimum_bytes_needed()
-    }
-}

@@ -109,16 +109,16 @@ impl< 'a, C: Context > Reader< 'a, C > for BufferReader< 'a, C > {
     }
 }
 
-struct CopyingBufferReader< 'ctx, 'a, C > where C: Context {
-    context: &'ctx mut C,
+struct CopyingBufferReader< 'a, C > where C: Context {
+    context: C,
     ptr: *const u8,
     end: *const u8,
     phantom: PhantomData< &'a [u8] >
 }
 
-impl< 'ctx, 'a, C > CopyingBufferReader< 'ctx, 'a, C > where C: Context {
+impl< 'a, C > CopyingBufferReader< 'a, C > where C: Context {
     #[inline]
-    fn new( context: &'ctx mut C, buffer: &'a [u8] ) -> Self {
+    fn new( context: C, buffer: &'a [u8] ) -> Self {
         CopyingBufferReader {
             context,
             ptr: buffer.as_ptr(),
@@ -128,7 +128,7 @@ impl< 'ctx, 'a, C > CopyingBufferReader< 'ctx, 'a, C > where C: Context {
     }
 }
 
-impl< 'ctx, 'r, 'a, C: Context > Reader< 'r, C > for CopyingBufferReader< 'ctx, 'a, C > {
+impl< 'r, 'a, C: Context > Reader< 'r, C > for CopyingBufferReader< 'a, C > {
     #[inline(always)]
     fn read_bytes( &mut self, output: &mut [u8] ) -> Result< (), C::Error > {
         let length = output.len();
@@ -319,36 +319,19 @@ pub trait Readable< 'a, C: Context >: Sized {
         0
     }
 
-    /// Deserializes from a given buffer.
-    ///
-    /// This performs zero-copy deserialization when possible.
     #[inline]
     fn read_from_buffer( buffer: &'a [u8] ) -> Result< Self, C::Error > where Self: DefaultContext< Context = C >, C: Default {
         Self::read_from_buffer_with_ctx( Default::default(), buffer )
     }
 
-    /// Deserializes from a given buffer while also returning the amount of bytes consumed.
-    ///
-    /// This performs zero-copy deserialization when possible.
     #[inline]
     fn read_with_length_from_buffer( buffer: &'a [u8] ) -> (Result< Self, C::Error >, usize) where Self: DefaultContext< Context = C >, C: Default {
         Self::read_with_length_from_buffer_with_ctx( Default::default(), buffer )
     }
 
-    /// Deserializes from a given buffer.
-    ///
-    /// This never performs zero-copy deserialization.
     #[inline]
-    fn read_from_buffer_copying_data( buffer: &[u8] ) -> Result< Self, C::Error > where Self: DefaultContext< Context = C >, C: Default {
-        Self::read_from_buffer_copying_data_with_ctx( Default::default(), buffer )
-    }
-
-    /// Deserializes from a given buffer while also returning the amount of bytes consumed.
-    ///
-    /// This never performs zero-copy deserialization.
-    #[inline]
-    fn read_with_length_from_buffer_copying_data( buffer: &[u8] ) -> (Result< Self, C::Error >, usize) where Self: DefaultContext< Context = C >, C: Default {
-        Self::read_with_length_from_buffer_copying_data_with_ctx( Default::default(), buffer )
+    fn read_from_buffer_owned( buffer: &[u8] ) -> Result< Self, C::Error > where Self: DefaultContext< Context = C >, C: Default {
+        Self::read_from_buffer_owned_with_ctx( Default::default(), buffer )
     }
 
     /// Reads from a given stream without any buffering.
@@ -401,27 +384,15 @@ pub trait Readable< 'a, C: Context >: Sized {
     }
 
     #[inline]
-    fn read_from_buffer_copying_data_with_ctx( context: C, buffer: &[u8] ) -> Result< Self, C::Error > {
-        Self::read_with_length_from_buffer_copying_data_with_ctx( context, buffer ).0
-    }
-
-    #[inline]
-    fn read_with_length_from_buffer_copying_data_with_ctx( mut context: C, buffer: &[u8] ) -> (Result< Self, C::Error >, usize) {
-        Self::read_with_length_from_buffer_copying_data_with_ctx_mut( &mut context, buffer )
-    }
-
-    #[inline]
-    fn read_with_length_from_buffer_copying_data_with_ctx_mut( context: &mut C, buffer: &[u8] ) -> (Result< Self, C::Error >, usize) {
+    fn read_from_buffer_owned_with_ctx( context: C, buffer: &[u8] ) -> Result< Self, C::Error > {
         let bytes_needed = Self::minimum_bytes_needed();
         let buffer_length = buffer.len();
         if buffer_length < bytes_needed {
-            return (Err( error_input_buffer_is_too_small( buffer_length, bytes_needed ) ), 0);
+            return Err( error_input_buffer_is_too_small( buffer_length, bytes_needed ) );
         }
 
         let mut reader = CopyingBufferReader::new( context, buffer );
-        let value = Self::read_from( &mut reader );
-        let bytes_read = reader.ptr as usize - buffer.as_ptr() as usize;
-        (value, bytes_read)
+        Self::read_from( &mut reader )
     }
 
     #[inline]
@@ -477,37 +448,36 @@ fn test_peek() {
         std::slice::from_raw_parts( (&value as *const f64) as *const u8, 8 )
     };
 
-    let mut ctx = crate::LittleEndian {};
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_f64().unwrap(), reader.read_f64().unwrap() );
 
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_f32().unwrap(), reader.read_f32().unwrap() );
 
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_u64().unwrap(), reader.read_u64().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_i64().unwrap(), reader.read_i64().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_u32().unwrap(), reader.read_u32().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_i32().unwrap(), reader.read_i32().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_u16().unwrap(), reader.read_u16().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_i16().unwrap(), reader.read_i16().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_u8().unwrap(), reader.read_u8().unwrap() );
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_i8().unwrap(), reader.read_i8().unwrap() );
 
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_u64_varint().unwrap(), reader.read_u64_varint().unwrap() );
 
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     assert_eq!( reader.peek_u64().unwrap(), reader.peek_u64().unwrap() );
 
-    let mut reader = CopyingBufferReader::new( &mut ctx, data );
+    let mut reader = CopyingBufferReader::new( crate::LittleEndian {}, data );
     reader.peek_u8().unwrap();
     assert_eq!( reader.read_f64().unwrap(), 2.0 );
 }

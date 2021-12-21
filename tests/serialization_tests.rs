@@ -39,7 +39,7 @@ macro_rules! symmetric_tests {
             fn round_trip_le_owned() {
                 let original: $type = $value;
                 let serialized = original.write_to_vec_with_ctx( Endianness::LittleEndian ).unwrap();
-                let deserialized: $type = Readable::read_from_buffer_copying_data_with_ctx( Endianness::LittleEndian, &serialized ).unwrap();
+                let deserialized: $type = Readable::read_from_buffer_owned_with_ctx( Endianness::LittleEndian, &serialized ).unwrap();
                 assert_eq!( original, deserialized );
             }
 
@@ -63,7 +63,7 @@ macro_rules! symmetric_tests {
             fn round_trip_be_owned() {
                 let original: $type = $value;
                 let serialized = original.write_to_vec_with_ctx( Endianness::BigEndian ).unwrap();
-                let deserialized: $type = Readable::read_from_buffer_copying_data_with_ctx( Endianness::BigEndian, &serialized ).unwrap();
+                let deserialized: $type = Readable::read_from_buffer_owned_with_ctx( Endianness::BigEndian, &serialized ).unwrap();
                 assert_eq!( original, deserialized );
             }
 
@@ -518,13 +518,6 @@ enum DerivedEnumWithPeekTagU8 {
     Two( u8 )
 }
 
-#[derive(PartialEq, Debug, Readable, Writable)]
-#[speedy(tag_type = u8)]
-enum DerivedRecursiveEnum {
-    None,
-    Some( Box< DerivedRecursiveEnum > )
-}
-
 // This is here only to make sure it compiles.
 #[derive(PartialEq, Debug, Readable, Writable)]
 struct DerivedStructWithTwoDifferentCows< 'a > {
@@ -587,17 +580,6 @@ atomic_wrapper!( AtomicI32, i32 );
 atomic_wrapper!( AtomicU32, u32 );
 atomic_wrapper!( AtomicI64, i64 );
 atomic_wrapper!( AtomicU64, u64 );
-
-#[derive(Readable, Writable, PartialEq, Eq, Debug)]
-#[repr(transparent)]
-struct TransparentU8( u8 );
-
-#[derive(Readable, Writable, PartialEq, Eq, Debug)]
-#[repr(transparent)]
-struct TransparentU32( u32 );
-
-#[derive(Readable, Writable, PartialEq, Eq, Debug)]
-struct NonTransparentU8( u8 );
 
 symmetric_tests! {
     vec_u8 for Vec< u8 > {
@@ -758,12 +740,6 @@ symmetric_tests! {
         be = [33],
         minimum_bytes = 1
     }
-    transparent_u8 for TransparentU8 {
-        in = TransparentU8(33),
-        le = [33],
-        be = [33],
-        minimum_bytes = 1
-    }
     i8 for i8 {
         in = -33,
         le = [223],
@@ -784,12 +760,6 @@ symmetric_tests! {
     }
     u32 for u32 {
         in = 33,
-        le = [33, 0, 0, 0],
-        be = [0, 0, 0, 33],
-        minimum_bytes = 4
-    }
-    transparent_u32 for TransparentU32 {
-        in = TransparentU32(33),
         le = [33, 0, 0, 0],
         be = [0, 0, 0, 33],
         minimum_bytes = 4
@@ -1015,32 +985,6 @@ symmetric_tests! {
             0, 0, 0, 0
         ],
         minimum_bytes = 12
-    }
-    boxed for Box< u8 > {
-        in = Box::new( 10 ),
-        le = [10],
-        be = [10],
-        minimum_bytes = 1
-    }
-    boxed_slice for Box< [u8] > {
-        in = vec![ 10, 11 ].into(),
-        le = [
-            2, 0, 0, 0,
-            10,
-            11
-        ],
-        be = [
-            0, 0, 0, 2,
-            10,
-            11
-        ],
-        minimum_bytes = 4
-    }
-    boxed_str for Box< str > {
-        in = "Hello".into(),
-        le = [5, 0, 0, 0, 72, 101, 108, 108, 111],
-        be = [0, 0, 0, 5, 72, 101, 108, 108, 111],
-        minimum_bytes = 4
     }
     derived_struct for DerivedStruct {
         in = DerivedStruct { a: 1, b: 2, c: 3 },
@@ -1396,12 +1340,6 @@ symmetric_tests! {
         be = [1],
         minimum_bytes = 1
     }
-    derived_recursive_enum for DerivedRecursiveEnum {
-        in = DerivedRecursiveEnum::Some( Box::new( DerivedRecursiveEnum::None ) ),
-        le = [1, 0],
-        be = [1, 0],
-        minimum_bytes = 1
-    }
 }
 
 #[cfg(feature = "chrono")]
@@ -1428,22 +1366,6 @@ symmetric_tests! {
         be = [0, 0, 0, 3, 111, 112, 113],
         minimum_bytes = 4
     }
-}
-
-#[cfg(feature = "regex")]
-#[test]
-fn test_regex() {
-    use speedy::{
-        Readable,
-        Writable
-    };
-
-    let regex = regex::Regex::new( "[a-z]+" ).unwrap();
-    let buffer = regex.write_to_vec().unwrap();
-    assert_eq!( buffer, &[6, 0, 0, 0, b'[', b'a', b'-', b'z', b']', b'+'] );
-
-    let deserialized = regex::Regex::read_from_buffer( &buffer ).unwrap();
-    assert_eq!( regex.as_str(), deserialized.as_str() );
 }
 
 #[test]
@@ -1531,10 +1453,4 @@ fn test_minimum_bytes_needed() {
     };
 
     assert_eq!( <DerivedStructWithDefaultOnEof as Readable< Endianness >>::minimum_bytes_needed(), 1 );
-}
-
-#[test]
-fn test_derive_transparent() {
-    assert!( <TransparentU8 as Readable< Endianness >>::speedy_is_primitive() );
-    assert!( !<NonTransparentU8 as Readable< Endianness >>::speedy_is_primitive() );
 }
